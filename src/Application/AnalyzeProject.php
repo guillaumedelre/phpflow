@@ -145,6 +145,7 @@ final readonly class AnalyzeProject
             $ast->loopControls(),
             $symbolFiles,
             $ast->doctrineEntities(),
+            $ast->apiPlatformCoverage(),
         );
     }
 }
