@@ -52,6 +52,7 @@ final readonly class ProjectAnalysis
         private array $loopControls = [],
         private array $symbolFiles = [],
         private array $doctrineEntities = [],
+        private ApiPlatformCoverage $apiPlatformCoverage = new ApiPlatformCoverage(),
     ) {
     }
 
@@ -119,4 +120,5 @@ final readonly class ProjectAnalysis
 
     /** @return list<DoctrineEntity> */
     public function doctrineEntities(): array { return $this->doctrineEntities; }
+    public function apiPlatformCoverage(): ApiPlatformCoverage { return $this->apiPlatformCoverage; }
 }
