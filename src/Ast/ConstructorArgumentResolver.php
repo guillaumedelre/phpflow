@@ -17,8 +17,8 @@ use PhpParser\NodeFinder;
  * defaulted) forwarded as is, or such a parameter with a literal `??` fallback.
  * Anything else stays unresolved, and so does the whole chain as soon as it
  * would need a vendor constructor signature (positional arguments to
- * `parent::__construct()`), a spread, or a constructor that never calls its
- * parent.
+ * `parent::__construct()`), a spread, or a constructor that does not call its
+ * parent unconditionally.
  */
 final readonly class ConstructorArgumentResolver
 {
@@ -167,17 +167,45 @@ final readonly class ConstructorArgumentResolver
         return $scope;
     }
 
+    /**
+     * The `parent::__construct()` call, only when it runs on every path: it is the
+     * only one in the body, a top-level statement, and no statement before it can
+     * return early.
+     */
     private function parentConstructorCall(Node\Stmt\ClassMethod $constructor): ?Node\Expr\StaticCall
     {
-        $calls = array_values(array_filter(
-            (new NodeFinder())->findInstanceOf($constructor->stmts ?? [], Node\Expr\StaticCall::class),
-            static fn (Node\Expr\StaticCall $call): bool => $call->class instanceof Node\Name
-                && strtolower($call->class->toString()) === 'parent'
-                && $call->name instanceof Node\Identifier
-                && strtolower($call->name->toString()) === '__construct',
-        ));
+        $finder = new NodeFinder();
+        $statements = $constructor->stmts ?? [];
+        $calls = $finder->find($statements, $this->isParentConstructorCall(...));
 
-        return count($calls) === 1 ? $calls[0] : null;
+        if (count($calls) !== 1) {
+            return null;
+        }
+
+        foreach ($statements as $statement) {
+            if (
+                $statement instanceof Node\Stmt\Expression
+                && $statement->expr === $calls[0]
+                && $statement->expr instanceof Node\Expr\StaticCall
+            ) {
+                return $statement->expr;
+            }
+
+            if ($finder->findFirstInstanceOf($statement, Node\Stmt\Return_::class) !== null) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private function isParentConstructorCall(Node $node): bool
+    {
+        return $node instanceof Node\Expr\StaticCall
+            && $node->class instanceof Node\Name
+            && strtolower($node->class->toString()) === 'parent'
+            && $node->name instanceof Node\Identifier
+            && strtolower($node->name->toString()) === '__construct';
     }
 
     /**

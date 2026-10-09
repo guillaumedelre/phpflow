@@ -49,6 +49,70 @@ final class ConstructorArgumentResolverTest extends TestCase
             public function __construct() {}
         }
 
+        class Conditional extends Base
+        {
+            public function __construct(bool $flag = true)
+            {
+                if ($flag) {
+                    parent::__construct(target: Foo::class);
+                }
+            }
+        }
+
+        class InLoop extends Base
+        {
+            public function __construct()
+            {
+                foreach ([1] as $item) {
+                    parent::__construct(target: Foo::class);
+                }
+            }
+        }
+
+        class InTernary extends Base
+        {
+            public function __construct(bool $flag = true)
+            {
+                $flag ? parent::__construct(target: Foo::class) : null;
+            }
+        }
+
+        class TwoBranches extends Base
+        {
+            public function __construct(bool $flag = true)
+            {
+                parent::__construct(target: Foo::class);
+
+                if ($flag) {
+                    parent::__construct(target: Bar::class);
+                }
+            }
+        }
+
+        class EarlyReturn extends Base
+        {
+            public function __construct(bool $flag = true)
+            {
+                if ($flag) {
+                    return;
+                }
+
+                parent::__construct(target: Foo::class);
+            }
+        }
+
+        class GuardedThenCalled extends Base
+        {
+            public function __construct(?string $path = null)
+            {
+                if ($path === '') {
+                    throw new \InvalidArgumentException();
+                }
+
+                parent::__construct(path: $path, target: Foo::class);
+            }
+        }
+
         class Computed extends Base
         {
             public function __construct() { parent::__construct(target: self::pick()); }
@@ -102,6 +166,20 @@ final class ConstructorArgumentResolverTest extends TestCase
         self::assertNull($this->resolve('Positional', ''));
         self::assertNull($this->resolve('Plain', '"/positional"'));
         self::assertNull($this->resolve('NoParentCall', ''));
+    }
+
+    public function testItStaysUnresolvedWhenTheParentCallMayNotRun(): void
+    {
+        self::assertNull($this->resolve('Conditional', ''));
+        self::assertNull($this->resolve('InLoop', ''));
+        self::assertNull($this->resolve('InTernary', ''));
+        self::assertNull($this->resolve('TwoBranches', ''));
+        self::assertNull($this->resolve('EarlyReturn', ''));
+    }
+
+    public function testAThrowingGuardBeforeTheParentCallKeepsItUnconditional(): void
+    {
+        self::assertEquals(new ClassReference('App\\Foo'), $this->resolve('GuardedThenCalled', 'path: "/g"')?->value('target'));
     }
 
     public function testAComputedValueIsPassedButUnresolved(): void
