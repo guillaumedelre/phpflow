@@ -3103,7 +3103,7 @@ final class ProjectAstAnalyzer
                     $inputs['targets'],
                     $routePrefix,
                     $resourceClass,
-                    $resourceTargets,
+                    array_diff_key($resourceTargets, array_flip($inputs['unknownTargets'])),
                     $resourceUriTemplate,
                 );
 
@@ -3118,9 +3118,10 @@ final class ProjectAstAnalyzer
              * `method`, `read` and `write` decide whether an inherited target
              * applies, so an operation setting one of them to something unreadable
              * cannot be interpreted. An unreadable `uriTemplate`, `name` or target
-             * is ignored, as it is on a built-in operation.
+             * is ignored, as it is on a built-in operation, but an unreadable target
+             * may not be null, so the resource one is not inherited in its place.
              *
-             * @return ?array{method: string, path: ?string, name: ?string, read: ?bool, write: ?bool, targets: array<string, string>}
+             * @return ?array{method: string, path: ?string, name: ?string, read: ?bool, write: ?bool, targets: array<string, string>, unknownTargets: list<string>}
              */
             private function customOperationInputs(ResolvedArguments $resolved): ?array
             {
@@ -3157,12 +3158,15 @@ final class ProjectAstAnalyzer
                 $path = $resolved->value('uriTemplate');
                 $name = $resolved->value('name');
                 $targets = [];
+                $unknownTargets = [];
 
                 foreach (array_keys(self::API_PLATFORM_TARGET_METHODS) as $kind) {
                     $target = $resolved->value($kind);
 
                     if ($target instanceof ClassReference) {
                         $targets[$kind] = $target->name;
+                    } elseif ($resolved->isPassed($kind) && !$resolved->isResolved($kind)) {
+                        $unknownTargets[] = $kind;
                     }
                 }
 
@@ -3173,6 +3177,7 @@ final class ProjectAstAnalyzer
                     'read' => $flags['read'],
                     'write' => $flags['write'],
                     'targets' => $targets,
+                    'unknownTargets' => $unknownTargets,
                 ];
             }
 

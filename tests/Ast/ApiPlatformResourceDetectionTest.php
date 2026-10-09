@@ -188,7 +188,7 @@ final class ApiPlatformResourceDetectionTest extends TestCase
             ),
         );
 
-        // The fixture declares thirty-four operations. The five without a provable
+        // The fixture declares thirty-six operations. The seven without a provable
         // target and the five of an unrecognized operation class contribute
         // nothing, and four name or inherit two targets at once, so twenty-eight
         // entry points remain.
@@ -289,7 +289,7 @@ final class ApiPlatformResourceDetectionTest extends TestCase
 
     public function testItLeavesUnreadableCustomOperationsUnrepresented(): void
     {
-        foreach (['positional', 'computed-method', 'computed-provider', 'string-target'] as $suffix) {
+        foreach (['positional', 'computed-method', 'computed-provider', 'string-target', 'reassigned-provider', 'overwritten-provider'] as $suffix) {
             self::assertSame([], $this->entryPointsFor('/custom/catalogs/'.$suffix));
         }
     }
@@ -300,10 +300,10 @@ final class ApiPlatformResourceDetectionTest extends TestCase
             (new DirectoryScanner())->scan(__DIR__.'/../Fixtures/SimpleProject'),
         )->apiPlatformCoverage();
 
-        self::assertSame(18, $coverage->resources());
-        self::assertSame(34, $coverage->operations());
+        self::assertSame(19, $coverage->resources());
+        self::assertSame(36, $coverage->operations());
         self::assertSame(24, $coverage->operationsWithTarget());
-        self::assertSame(5, $coverage->operationsWithoutTarget());
+        self::assertSame(7, $coverage->operationsWithoutTarget());
         self::assertSame(5, $coverage->unrecognizedOperations());
         self::assertSame(1, $coverage->resourcesWithoutOperations());
     }

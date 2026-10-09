@@ -18,7 +18,8 @@ use PhpParser\NodeFinder;
  * Anything else stays unresolved, and so does the whole chain as soon as it
  * would need a vendor constructor signature (positional arguments to
  * `parent::__construct()`), a spread, or a constructor that does not call its
- * parent unconditionally.
+ * parent unconditionally. A parameter written before the parent call, or a
+ * `$this` property written after it, leaves that value unresolved.
  */
 final readonly class ConstructorArgumentResolver
 {
@@ -90,9 +91,18 @@ final readonly class ConstructorArgumentResolver
             return null;
         }
 
-        $call = $this->parentConstructorCall($constructor);
+        $statements = $constructor->stmts ?? [];
+        $position = $this->parentConstructorCallPosition($statements);
 
-        if ($call === null) {
+        if ($position === null) {
+            return null;
+        }
+
+        $call = $statements[$position]->expr;
+        $scope = $this->forgetReassignedParameters($scope, array_slice($statements, 0, $position + 1));
+        $overwritten = $this->overwrittenProperties(array_slice($statements, $position + 1));
+
+        if ($overwritten === null || !$call instanceof Node\Expr\StaticCall) {
             return null;
         }
 
@@ -106,7 +116,7 @@ final readonly class ConstructorArgumentResolver
             $forwarded[$argument->name->toString()] = $this->evaluate($argument->value, $scope);
         }
 
-        return $this->descend($parent, $forwarded, [], $ancestor, $depth);
+        return $this->descend($parent, $forwarded, [], $ancestor, $depth)?->withUnresolved($overwritten);
     }
 
     /**
@@ -168,27 +178,24 @@ final readonly class ConstructorArgumentResolver
     }
 
     /**
-     * The `parent::__construct()` call, only when it runs on every path: it is the
-     * only one in the body, a top-level statement, and no statement before it can
-     * return early.
+     * Position of the `parent::__construct()` statement, only when it runs on
+     * every path: it is the only call in the body, a top-level statement, and no
+     * statement before it can return early.
+     *
+     * @param array<Node\Stmt> $statements
      */
-    private function parentConstructorCall(Node\Stmt\ClassMethod $constructor): ?Node\Expr\StaticCall
+    private function parentConstructorCallPosition(array $statements): ?int
     {
         $finder = new NodeFinder();
-        $statements = $constructor->stmts ?? [];
         $calls = $finder->find($statements, $this->isParentConstructorCall(...));
 
         if (count($calls) !== 1) {
             return null;
         }
 
-        foreach ($statements as $statement) {
-            if (
-                $statement instanceof Node\Stmt\Expression
-                && $statement->expr === $calls[0]
-                && $statement->expr instanceof Node\Expr\StaticCall
-            ) {
-                return $statement->expr;
+        foreach ($statements as $position => $statement) {
+            if ($statement instanceof Node\Stmt\Expression && $statement->expr === $calls[0]) {
+                return $position;
             }
 
             if ($finder->findFirstInstanceOf($statement, Node\Stmt\Return_::class) !== null) {
@@ -197,6 +204,131 @@ final readonly class ConstructorArgumentResolver
         }
 
         return null;
+    }
+
+    /**
+     * A parameter written before the parent call no longer holds its passed or
+     * default value, and its new value is not propagated.
+     *
+     * @param array<string, ?array{0: mixed}> $scope
+     * @param array<Node>                     $statements
+     *
+     * @return array<string, ?array{0: mixed}>
+     */
+    private function forgetReassignedParameters(array $scope, array $statements): array
+    {
+        foreach ($this->writtenTargets($statements) as $target) {
+            if (!$target instanceof Node\Expr\Variable) {
+                continue;
+            }
+
+            if (!is_string($target->name)) {
+                return array_map(static fn (): null => null, $scope);
+            }
+
+            if (array_key_exists($target->name, $scope)) {
+                $scope[$target->name] = null;
+            }
+        }
+
+        return $scope;
+    }
+
+    /**
+     * Properties written on `$this` after the parent call, which replace what the
+     * ancestor constructor received. Null when a property name is dynamic.
+     *
+     * @param array<Node> $statements
+     *
+     * @return ?list<string>
+     */
+    private function overwrittenProperties(array $statements): ?array
+    {
+        $properties = [];
+
+        foreach ($this->writtenTargets($statements) as $target) {
+            if (
+                !$target instanceof Node\Expr\PropertyFetch
+                || !$target->var instanceof Node\Expr\Variable
+                || $target->var->name !== 'this'
+            ) {
+                continue;
+            }
+
+            if (!$target->name instanceof Node\Identifier) {
+                return null;
+            }
+
+            $properties[] = $target->name->toString();
+        }
+
+        return $properties;
+    }
+
+    /**
+     * Variables and properties written by a statically recognizable write.
+     * A by-reference argument to a call is not seen.
+     *
+     * @param array<Node> $statements
+     *
+     * @return list<Node\Expr>
+     */
+    private function writtenTargets(array $statements): array
+    {
+        $targets = [];
+
+        foreach ((new NodeFinder())->find($statements, static fn (): bool => true) as $node) {
+            $written = match (true) {
+                $node instanceof Node\Expr\Assign,
+                $node instanceof Node\Expr\AssignOp,
+                $node instanceof Node\Expr\PreInc,
+                $node instanceof Node\Expr\PreDec,
+                $node instanceof Node\Expr\PostInc,
+                $node instanceof Node\Expr\PostDec,
+                $node instanceof Node\Stmt\Catch_ => [$node->var],
+                // Both sides are aliased, so a later write through either changes the other.
+                $node instanceof Node\Expr\AssignRef => [$node->var, $node->expr],
+                $node instanceof Node\ClosureUse => $node->byRef ? [$node->var] : [],
+                $node instanceof Node\Stmt\Foreach_ => [$node->keyVar, $node->valueVar],
+                $node instanceof Node\Stmt\Unset_, $node instanceof Node\Stmt\Global_ => $node->vars,
+                $node instanceof Node\Stmt\Static_ => array_map(static fn (Node\StaticVar $var): Node\Expr => $var->var, $node->vars),
+                default => [],
+            };
+
+            foreach ($written as $target) {
+                if ($target instanceof Node\Expr) {
+                    array_push($targets, ...$this->writtenBases($target));
+                }
+            }
+        }
+
+        return $targets;
+    }
+
+    /**
+     * `[$a, $b] = ...` writes each element, `$a['k'] = ...` writes `$a`.
+     *
+     * @return list<Node\Expr>
+     */
+    private function writtenBases(Node\Expr $target): array
+    {
+        if ($target instanceof Node\Expr\List_ || $target instanceof Node\Expr\Array_) {
+            $bases = [];
+
+            foreach ($target->items as $item) {
+                if ($item !== null) {
+                    array_push($bases, ...$this->writtenBases($item->value));
+                }
+            }
+
+            return $bases;
+        }
+
+        if ($target instanceof Node\Expr\ArrayDimFetch) {
+            return $this->writtenBases($target->var);
+        }
+
+        return [$target];
     }
 
     private function isParentConstructorCall(Node $node): bool

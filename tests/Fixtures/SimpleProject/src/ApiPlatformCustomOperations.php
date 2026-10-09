@@ -96,6 +96,28 @@ final class StringTargetOperation extends HttpOperation
     }
 }
 
+// Unresolved: the forwarded provider parameter is reassigned before the parent call.
+final class ReassignedProviderOperation extends HttpOperation
+{
+    public function __construct(?string $uriTemplate = null, $provider = ExportProvider::class)
+    {
+        $provider = LegacyExportProvider::class;
+
+        parent::__construct(uriTemplate: $uriTemplate, provider: $provider);
+    }
+}
+
+// Unresolved: the provider property is overwritten after the parent call.
+final class OverwrittenProviderOperation extends HttpOperation
+{
+    public function __construct(?string $uriTemplate = null)
+    {
+        parent::__construct(uriTemplate: $uriTemplate, provider: ExportProvider::class);
+
+        $this->provider = LegacyExportProvider::class;
+    }
+}
+
 // GraphQL stays out of scope.
 final class GraphQlCatalogQuery extends Query
 {
@@ -162,6 +184,18 @@ final class CustomCatalogDefaults
     ],
 )]
 final class CustomCatalogUnresolved
+{
+}
+
+// An unreadable provider is not replaced by the resource one.
+#[ApiResource(
+    provider: CatalogSummaryProvider::class,
+    operations: [
+        new ReassignedProviderOperation(uriTemplate: 'custom/catalogs/reassigned-provider'),
+        new OverwrittenProviderOperation(uriTemplate: 'custom/catalogs/overwritten-provider'),
+    ],
+)]
+final class CustomCatalogRewritten
 {
 }
 

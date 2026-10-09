@@ -17,6 +17,14 @@ final readonly class ResolvedArguments
     {
     }
 
+    /**
+     * @param list<string> $names Arguments known to be set, to an unknown value
+     */
+    public function withUnresolved(array $names): self
+    {
+        return new self([...$this->arguments, ...array_fill_keys($names, null)]);
+    }
+
     public function isPassed(string $name): bool
     {
         return array_key_exists($name, $this->arguments);

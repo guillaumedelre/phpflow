@@ -30,11 +30,11 @@ final class ScanCommandTest extends TestCase
 
         $output = preg_replace('/\s+/', ' ', $tester->getDisplay());
 
-        self::assertStringContainsString('Resources 18', $output);
-        self::assertStringContainsString('Operations 34', $output);
+        self::assertStringContainsString('Resources 19', $output);
+        self::assertStringContainsString('Operations 36', $output);
         self::assertStringContainsString('With a provable target 24', $output);
         self::assertStringContainsString(
-            'Without a provable target 5 (not represented: framework defaults or unresolved targets)',
+            'Without a provable target 7 (not represented: framework defaults or unresolved targets)',
             $output,
         );
         self::assertStringContainsString('Unrecognized operation class 5 (not represented)', $output);

@@ -113,6 +113,80 @@ final class ConstructorArgumentResolverTest extends TestCase
             }
         }
 
+        class ReassignedBeforeCall extends Base
+        {
+            public function __construct(?string $path = null, $target = Foo::class)
+            {
+                $target = Bar::class;
+                parent::__construct(path: $path, target: $target);
+            }
+        }
+
+        class DestructuredBeforeCall extends Base
+        {
+            public function __construct($target = Foo::class)
+            {
+                [$target] = [Bar::class];
+                parent::__construct(target: $target);
+            }
+        }
+
+        class AliasedBeforeCall extends Base
+        {
+            public function __construct($target = Foo::class)
+            {
+                $alias = &$target;
+                $alias = Bar::class;
+                parent::__construct(target: $target);
+            }
+        }
+
+        class VariableVariableBeforeCall extends Base
+        {
+            public function __construct(string $name = 'target', $target = Foo::class)
+            {
+                $$name = Bar::class;
+                parent::__construct(target: $target);
+            }
+        }
+
+        class ReassignedAfterCall extends Base
+        {
+            public function __construct($target = Foo::class)
+            {
+                parent::__construct(target: $target);
+                $target = Bar::class;
+            }
+        }
+
+        class OverwrittenAfterCall extends Base
+        {
+            public function __construct(?string $path = null)
+            {
+                parent::__construct(path: $path, target: Foo::class);
+                $this->target = Bar::class;
+                $this->kind ??= Kind::class;
+            }
+        }
+
+        class OverwritesForwarded extends Forwarding
+        {
+            public function __construct()
+            {
+                parent::__construct(path: '/o');
+                $this->target = Bar::class;
+            }
+        }
+
+        class DynamicPropertyAfterCall extends Base
+        {
+            public function __construct(string $property = 'target')
+            {
+                parent::__construct(target: Foo::class);
+                $this->{$property} = Bar::class;
+            }
+        }
+
         class Computed extends Base
         {
             public function __construct() { parent::__construct(target: self::pick()); }
@@ -180,6 +254,48 @@ final class ConstructorArgumentResolverTest extends TestCase
     public function testAThrowingGuardBeforeTheParentCallKeepsItUnconditional(): void
     {
         self::assertEquals(new ClassReference('App\\Foo'), $this->resolve('GuardedThenCalled', 'path: "/g"')?->value('target'));
+    }
+
+    public function testAParameterReassignedBeforeTheParentCallIsUnresolved(): void
+    {
+        $resolved = $this->resolve('ReassignedBeforeCall', 'path: "/r"');
+
+        self::assertTrue($resolved?->isPassed('target'));
+        self::assertFalse($resolved->isResolved('target'));
+        self::assertSame('/r', $resolved->value('path'));
+
+        foreach (['DestructuredBeforeCall', 'AliasedBeforeCall', 'VariableVariableBeforeCall'] as $class) {
+            self::assertFalse($this->resolve($class, '')?->isResolved('target'), $class);
+        }
+    }
+
+    public function testAParameterReassignedAfterTheParentCallKeepsItsForwardedValue(): void
+    {
+        self::assertEquals(new ClassReference('App\\Foo'), $this->resolve('ReassignedAfterCall', '')?->value('target'));
+    }
+
+    public function testAPropertyWrittenAfterTheParentCallIsUnresolved(): void
+    {
+        $resolved = $this->resolve('OverwrittenAfterCall', 'path: "/w"');
+
+        self::assertTrue($resolved?->isPassed('target'));
+        self::assertFalse($resolved->isResolved('target'));
+        self::assertTrue($resolved->isPassed('kind'));
+        self::assertFalse($resolved->isResolved('kind'));
+        self::assertSame('/w', $resolved->value('path'));
+    }
+
+    public function testAPropertyWrittenBelowTheAncestorOverridesTheWholeChain(): void
+    {
+        $resolved = $this->resolve('OverwritesForwarded', '');
+
+        self::assertFalse($resolved?->isResolved('target'));
+        self::assertEquals(new ClassReference('App\\Kind'), $resolved->value('kind'));
+    }
+
+    public function testADynamicPropertyWriteAfterTheParentCallLeavesTheChainUnresolved(): void
+    {
+        self::assertNull($this->resolve('DynamicPropertyAfterCall', ''));
     }
 
     public function testAComputedValueIsPassedButUnresolved(): void
